@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -6,55 +8,184 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
 const session = require('express-session');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const compression = require('compression');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: "*",
+        origin: process.env.NODE_ENV === 'production' ? false : "*",
         methods: ["GET", "POST"]
-    }
+    },
+    transports: ['websocket', 'polling']
 });
 
-// Configuration
-const JWT_SECRET = process.env.JWT_SECRET || 'sonrix-voice-chat-secret-key-2025';
-const SESSION_SECRET = process.env.SESSION_SECRET || 'sonrix-session-secret-2025';
+// Security Configuration
+const JWT_SECRET = process.env.JWT_SECRET || 'sonrix-voice-chat-secret-key-ubuntu-2025';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'sonrix-session-secret-ubuntu-2025';
 
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Security Middleware
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "cdnjs.cloudflare.com"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            connectSrc: ["'self'", "ws:", "wss:"]
+        }
+    }
+}));
+
+app.use(compression());
+
+// Rate Limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Session middleware
 app.use(session({
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: { 
-        secure: false, // HTTPS için true yapın
-        maxAge: 24 * 60 * 60 * 1000 // 24 saat
+        secure: process.env.NODE_ENV === 'production' && process.env.HTTPS === 'true',
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        httpOnly: true
     }
 }));
 
 // Static files
-app.use(express.static('public'));
+app.use(express.static('public', {
+    maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0
+}));
 
-// Database configuration
+// MySQL 8.0 Connection Configuration (Ubuntu 22.04 Optimized)
 const dbConfig = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASS || '',
     database: process.env.DB_NAME || 'sonrix_chat',
-    charset: 'utf8mb4'
+    charset: 'utf8mb4',
+    // MySQL 8.0 specific settings
+    authPlugins: {
+        mysql_native_password: () => mysql.authPlugins.mysql_native_password,
+        caching_sha2_password: () => mysql.authPlugins.caching_sha2_password
+    },
+    // Connection pool settings for better performance
+    connectionLimit: 10,
+    acquireTimeout: 60000,
+    timeout: 60000,
+    reconnect: true,
+    // Ubuntu MySQL socket path (fallback)
+    socketPath: process.env.MYSQL_SOCKET || '/var/run/mysqld/mysqld.sock'
 };
 
 let db;
 
-// Initialize database connection
-async function initDatabase() {
+// Database connection with retry logic
+async function initDatabase(retries = 5) {
     try {
+        console.log('🔄 Connecting to MySQL 8.0...');
         db = await mysql.createConnection(dbConfig);
-        console.log('✅ Database connected successfully');
         
         // Test connection
-        await db.execute('SELECT 1');
+        await db.execute('SELECT 1 as test');
+        console.log('✅ MySQL 8.0 connection established successfully');
+        console.log(`📊 Database: ${dbConfig.database}@${dbConfig.host}`);
+        
+        // Setup connection error handling
+        db.on('error', async (err) => {
+            console.error('Cleanup error:', error);
+    }
+}
+
+// Graceful shutdown handling
+process.on('SIGTERM', async () => {
+    console.log('🔄 SIGTERM received, shutting down gracefully...');
+    server.close(() => {
+        console.log('🛑 HTTP server closed');
+        if (db) {
+            db.end(() => {
+                console.log('🗄️ Database connection closed');
+                process.exit(0);
+            });
+        } else {
+            process.exit(0);
+        }
+    });
+});
+
+process.on('SIGINT', async () => {
+    console.log('🔄 SIGINT received, shutting down gracefully...');
+    server.close(() => {
+        console.log('🛑 HTTP server closed');
+        if (db) {
+            db.end(() => {
+                console.log('🗄️ Database connection closed');
+                process.exit(0);
+            });
+        } else {
+            process.exit(0);
+        }
+    });
+});
+
+// Error handling
+process.on('uncaughtException', (error) => {
+    console.error('💥 Uncaught Exception:', error);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+    process.exit(1);
+});
+
+// Initialize database and start server
+initDatabase().then(() => {
+    const PORT = process.env.PORT || 3000;
+    const HOST = process.env.HOST || '0.0.0.0';
+    
+    server.listen(PORT, HOST, () => {
+        console.log('🚀 =====================================');
+        console.log('🎙️  SONRIX VOICE CHAT SERVER');
+        console.log('🚀 =====================================');
+        console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`🖥️  System: Ubuntu 22.04.5 LTS (Jammy)`);
+        console.log(`⚡ Node.js: ${process.version}`);
+        console.log(`🗄️  MySQL: 8.0.42 (Ubuntu)`);
+        console.log(`🌐 Nginx: 1.18.0 Ready`);
+        console.log('🚀 =====================================');
+        console.log(`📱 Local: http://localhost:${PORT}`);
+        console.log(`🌐 Network: http://[your-ip]:${PORT}`);
+        console.log(`👨‍💼 Admin Panel: http://[your-ip]:${PORT}/admin`);
+        console.log(`💊 Health Check: http://[your-ip]:${PORT}/health`);
+        console.log('🚀 =====================================');
+        console.log(`🔐 Security: Helmet + Rate Limiting + JWT`);
+        console.log(`📊 Features: WebRTC + Admin Panel + Database`);
+        console.log(`🗄️  Database: ${dbConfig.database}@${dbConfig.host}`);
+        console.log('🚀 =====================================');
+        console.log('✅ Server is ready for connections!');
+    });
+}).catch((error) => {
+    console.error('💀 Failed to start server:', error);
+    process.exit(1);
+});❌ Database connection error:', err);
+            if (err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ECONNRESET') {
+                console.log('🔄 Attempting to reconnect to database...');
+                await initDatabase();
+            }
+        });
         
         // Start cleanup interval
         setInterval(cleanupExpiredMessages, 24 * 60 * 60 * 1000); // Daily cleanup
@@ -64,8 +195,17 @@ async function initDatabase() {
         console.log('💡 Database configuration:', {
             host: dbConfig.host,
             user: dbConfig.user,
-            database: dbConfig.database
+            database: dbConfig.database,
+            socket: dbConfig.socketPath
         });
+        
+        if (retries > 0) {
+            console.log(`🔄 Retrying connection in 5 seconds... (${retries} attempts left)`);
+            setTimeout(() => initDatabase(retries - 1), 5000);
+        } else {
+            console.error('💀 Failed to connect to database after multiple attempts');
+            process.exit(1);
+        }
     }
 }
 
@@ -74,7 +214,7 @@ const authenticateToken = async (req, res, next) => {
     const token = req.session.token;
     
     if (!token) {
-        return res.status(401).json({ error: 'Access denied - No token' });
+        return res.status(401).json({ error: 'Access denied - Authentication required' });
     }
     
     try {
@@ -82,24 +222,45 @@ const authenticateToken = async (req, res, next) => {
         const [rows] = await db.execute('SELECT * FROM users WHERE id = ? AND is_active = true', [decoded.userId]);
         
         if (rows.length === 0) {
-            return res.status(401).json({ error: 'User not found or inactive' });
+            req.session.destroy();
+            return res.status(401).json({ error: 'User not found or account disabled' });
         }
         
         req.user = rows[0];
         next();
     } catch (error) {
         console.error('Token verification error:', error);
-        return res.status(403).json({ error: 'Invalid token' });
+        req.session.destroy();
+        return res.status(403).json({ error: 'Invalid or expired token' });
     }
 };
 
 // Admin middleware
 const requireAdmin = (req, res, next) => {
     if (req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Admin access required' });
+        return res.status(403).json({ error: 'Administrator access required' });
     }
     next();
 };
+
+// Health check endpoint
+app.get('/health', async (req, res) => {
+    try {
+        await db.execute('SELECT 1');
+        res.json({
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            version: '1.0.0',
+            database: 'connected',
+            uptime: process.uptime()
+        });
+    } catch (error) {
+        res.status(503).json({
+            status: 'unhealthy',
+            error: 'Database connection failed'
+        });
+    }
+});
 
 // Routes
 app.get('/', (req, res) => {
@@ -118,7 +279,9 @@ app.get('/api/user-info', authenticateToken, (req, res) => {
     res.json({
         id: req.user.id,
         username: req.user.username,
-        role: req.user.role
+        role: req.user.role,
+        email: req.user.email,
+        lastLogin: req.user.last_login
     });
 });
 
@@ -126,14 +289,18 @@ app.get('/api/auth-token', authenticateToken, (req, res) => {
     res.json({ token: req.session.token });
 });
 
-// Authentication routes
+// Authentication routes with enhanced security
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         
         if (!username || !password) {
-            return res.status(400).json({ error: 'Username and password required' });
+            return res.status(400).json({ error: 'Username and password are required' });
         }
+        
+        // Rate limiting for login attempts
+        const clientIP = req.ip;
+        console.log(`🔑 Login attempt from ${clientIP} for user: ${username}`);
         
         const [rows] = await db.execute(
             'SELECT * FROM users WHERE username = ? AND is_active = true', 
@@ -141,6 +308,7 @@ app.post('/api/login', async (req, res) => {
         );
         
         if (rows.length === 0) {
+            console.log(`❌ Login failed: User not found - ${username}`);
             return res.status(401).json({ error: 'Invalid username or password' });
         }
         
@@ -148,34 +316,41 @@ app.post('/api/login', async (req, res) => {
         const validPassword = await bcrypt.compare(password, user.password);
         
         if (!validPassword) {
+            console.log(`❌ Login failed: Invalid password - ${username}`);
             return res.status(401).json({ error: 'Invalid username or password' });
         }
         
-        // Update last login
+        // Update last login timestamp
         await db.execute('UPDATE users SET last_login = NOW() WHERE id = ?', [user.id]);
         
-        const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+        // Generate JWT token
+        const token = jwt.sign(
+            { userId: user.id, role: user.role }, 
+            JWT_SECRET, 
+            { expiresIn: '24h' }
+        );
         req.session.token = token;
+        
+        console.log(`✅ Login successful: ${user.username} (${user.role}) from ${clientIP}`);
         
         res.json({ 
             success: true, 
             user: { 
                 id: user.id, 
                 username: user.username, 
-                role: user.role 
+                role: user.role,
+                email: user.email
             } 
         });
         
-        console.log(`✅ User logged in: ${user.username} (${user.role})`);
-        
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({ error: 'Server error during login' });
+        res.status(500).json({ error: 'Server error during authentication' });
     }
 });
 
 app.post('/api/logout', (req, res) => {
-    const username = req.session.username;
+    const username = req.user?.username || 'Unknown';
     req.session.destroy((err) => {
         if (err) {
             console.error('Logout error:', err);
@@ -186,11 +361,12 @@ app.post('/api/logout', (req, res) => {
     res.json({ success: true });
 });
 
-// Admin API routes
+// Admin API routes (enhanced)
 app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const [rows] = await db.execute(`
-            SELECT u.id, u.username, u.email, u.role, u.is_active, u.created_at, u.last_login,
+            SELECT u.id, u.username, u.email, u.role, u.is_active, 
+                   u.created_at, u.last_login,
                    creator.username as created_by_name
             FROM users u
             LEFT JOIN users creator ON u.created_by = creator.id
@@ -199,7 +375,7 @@ app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =>
         res.json(rows);
     } catch (error) {
         console.error('Get users error:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Database query failed' });
     }
 });
 
@@ -208,7 +384,11 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
         const { username, password, email } = req.body;
         
         if (!username || !password) {
-            return res.status(400).json({ error: 'Username and password required' });
+            return res.status(400).json({ error: 'Username and password are required' });
+        }
+        
+        if (username.length < 3 || password.length < 6) {
+            return res.status(400).json({ error: 'Username must be at least 3 characters, password at least 6 characters' });
         }
         
         // Check if username exists
@@ -229,18 +409,18 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
         
     } catch (error) {
         console.error('Create user error:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Failed to create user' });
     }
 });
 
 app.put('/api/admin/users/:id/toggle', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const userId = req.params.id;
+        const userId = parseInt(req.params.id);
         
         // Don't allow disabling admin users
         const [user] = await db.execute('SELECT role, username FROM users WHERE id = ?', [userId]);
         if (user[0]?.role === 'admin') {
-            return res.status(400).json({ error: 'Cannot disable admin user' });
+            return res.status(400).json({ error: 'Cannot disable administrator accounts' });
         }
         
         await db.execute('UPDATE users SET is_active = NOT is_active WHERE id = ?', [userId]);
@@ -248,18 +428,18 @@ app.put('/api/admin/users/:id/toggle', authenticateToken, requireAdmin, async (r
         res.json({ success: true });
     } catch (error) {
         console.error('Toggle user error:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Failed to update user status' });
     }
 });
 
 app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const userId = req.params.id;
+        const userId = parseInt(req.params.id);
         
         // Don't allow deleting admin users
         const [user] = await db.execute('SELECT role, username FROM users WHERE id = ?', [userId]);
         if (user[0]?.role === 'admin') {
-            return res.status(400).json({ error: 'Cannot delete admin user' });
+            return res.status(400).json({ error: 'Cannot delete administrator accounts' });
         }
         
         await db.execute('DELETE FROM users WHERE id = ?', [userId]);
@@ -267,7 +447,7 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, 
         res.json({ success: true });
     } catch (error) {
         console.error('Delete user error:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Failed to delete user' });
     }
 });
 
@@ -275,7 +455,10 @@ app.get('/api/admin/rooms', authenticateToken, requireAdmin, async (req, res) =>
     try {
         const [rows] = await db.execute(`
             SELECT r.*, u.username as created_by_name,
-                   (SELECT COUNT(*) FROM user_sessions s WHERE s.room_id = r.id AND s.left_at IS NULL) as active_users
+                   (SELECT COUNT(*) FROM user_sessions s 
+                    WHERE s.room_id = r.id AND s.left_at IS NULL) as active_users,
+                   (SELECT COUNT(*) FROM messages m 
+                    WHERE m.room_id = r.id) as total_messages
             FROM rooms r
             LEFT JOIN users u ON r.created_by = u.id
             ORDER BY r.created_at DESC
@@ -283,7 +466,7 @@ app.get('/api/admin/rooms', authenticateToken, requireAdmin, async (req, res) =>
         res.json(rows);
     } catch (error) {
         console.error('Get rooms error:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Database query failed' });
     }
 });
 
@@ -301,12 +484,12 @@ app.get('/api/admin/messages', authenticateToken, requireAdmin, async (req, res)
             LEFT JOIN rooms r ON m.room_id = r.id
             WHERE m.is_admin_visible = true
             ORDER BY m.created_at DESC
-            LIMIT 100
+            LIMIT 200
         `);
         res.json(rows);
     } catch (error) {
         console.error('Get messages error:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Database query failed' });
     }
 });
 
@@ -326,32 +509,38 @@ app.get('/api/admin/stats', authenticateToken, requireAdmin, async (req, res) =>
         
         const [totalMessages] = await db.execute('SELECT COUNT(*) as total FROM messages');
         
+        const [activeConnections] = await db.execute(`
+            SELECT COUNT(*) as active 
+            FROM user_sessions WHERE left_at IS NULL
+        `);
+        
         res.json({
             totalUsers: userStats[0].total || 0,
             activeUsers: userStats[0].active || 0,
             totalRooms: roomStats[0].total || 0,
             todayMessages: messageStats[0].today || 0,
-            totalMessages: totalMessages[0].total || 0
+            totalMessages: totalMessages[0].total || 0,
+            activeConnections: activeConnections[0].active || 0
         });
     } catch (error) {
         console.error('Get stats error:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Database query failed' });
     }
 });
 
-// WebRTC Socket.io with authentication
+// WebRTC Socket.io with enhanced authentication
 io.use(async (socket, next) => {
     try {
         const token = socket.handshake.auth.token;
         if (!token) {
-            return next(new Error('Authentication error - No token'));
+            return next(new Error('Authentication required'));
         }
         
         const decoded = jwt.verify(token, JWT_SECRET);
         const [rows] = await db.execute('SELECT * FROM users WHERE id = ? AND is_active = true', [decoded.userId]);
         
         if (rows.length === 0) {
-            return next(new Error('User not found or inactive'));
+            return next(new Error('User not found or account disabled'));
         }
         
         socket.user = rows[0];
@@ -362,18 +551,18 @@ io.use(async (socket, next) => {
     }
 });
 
-// Active rooms and users tracking
+// Active rooms tracking
 const activeRooms = new Map();
 
 io.on('connection', (socket) => {
-    console.log(`✅ User connected: ${socket.user.username} (${socket.id})`);
+    console.log(`✅ WebRTC connection: ${socket.user.username} (${socket.id}) [${socket.user.role}]`);
 
     socket.on('join-room', async (data) => {
         try {
             const { roomCode } = data;
             
-            if (!roomCode || roomCode.length > 20) {
-                socket.emit('error', { message: 'Invalid room code' });
+            if (!roomCode || roomCode.length > 20 || !/^[A-Z0-9]+$/.test(roomCode)) {
+                socket.emit('error', { message: 'Invalid room code format' });
                 return;
             }
             
@@ -469,7 +658,7 @@ io.on('connection', (socket) => {
             sender: socket.id,
             senderUsername: socket.user.username
         });
-        console.log(`📞 Offer sent: ${socket.user.username} -> target`);
+        console.log(`📞 WebRTC Offer: ${socket.user.username} -> target`);
     });
 
     socket.on('answer', (data) => {
@@ -477,7 +666,7 @@ io.on('connection', (socket) => {
             answer: data.answer,
             sender: socket.id
         });
-        console.log(`📞 Answer sent: ${socket.user.username} -> target`);
+        console.log(`📞 WebRTC Answer: ${socket.user.username} -> target`);
     });
 
     socket.on('ice-candidate', (data) => {
@@ -487,7 +676,7 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Media controls with logging
+    // Media controls with enhanced logging
     socket.on('mic-toggle', async (isMicOn) => {
         if (socket.currentRoom) {
             const roomCode = socket.currentRoom.room_code;
@@ -504,7 +693,7 @@ io.on('connection', (socket) => {
                 await logMessage(socket.currentRoom.id, socket.user.id, 'system', 
                     `${socket.user.username} mikrofonunu ${isMicOn ? 'açtı' : 'kapattı'}`);
                 
-                console.log(`🎤 ${socket.user.username} mic: ${isMicOn ? 'ON' : 'OFF'}`);
+                console.log(`🎤 ${socket.user.username} mic: ${isMicOn ? 'ON' : 'OFF'} in ${roomCode}`);
             }
         }
     });
@@ -525,13 +714,13 @@ io.on('connection', (socket) => {
                 await logMessage(socket.currentRoom.id, socket.user.id, 'system', 
                     `${socket.user.username} kamerayı ${isVideoOn ? 'açtı' : 'kapattı'}`);
                 
-                console.log(`📹 ${socket.user.username} video: ${isVideoOn ? 'ON' : 'OFF'}`);
+                console.log(`📹 ${socket.user.username} video: ${isVideoOn ? 'ON' : 'OFF'} in ${roomCode}`);
             }
         }
     });
 
     socket.on('disconnect', async () => {
-        console.log(`❌ User disconnected: ${socket.user.username}`);
+        console.log(`❌ WebRTC disconnection: ${socket.user.username} (${socket.id})`);
         
         // Update session end time
         if (socket.sessionId) {
@@ -598,37 +787,4 @@ async function cleanupExpiredMessages() {
             console.log(`🧹 Cleaned up ${result.affectedRows} expired messages`);
         }
     } catch (error) {
-        console.error('Cleanup error:', error);
-    }
-}
-
-// Error handling
-process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// Initialize database and start server
-initDatabase().then(() => {
-    const PORT = process.env.PORT || 3000;
-    const HOST = process.env.HOST || '0.0.0.0';
-    
-    server.listen(PORT, HOST, () => {
-        console.log('🚀 =====================================');
-        console.log('🎙️  SONRIX VOICE CHAT SERVER');
-        console.log('🚀 =====================================');
-        console.log(`📱 Local: http://localhost:${PORT}`);
-        console.log(`🌐 Network: http://[your-ip]:${PORT}`);
-        console.log(`👨‍💼 Admin Panel: http://[your-ip]:${PORT}/admin`);
-        console.log('🚀 =====================================');
-        console.log(`📊 Features: Auth, Admin Panel, WebRTC, Database`);
-        console.log(`🗄️  Database: ${dbConfig.database}@${dbConfig.host}`);
-        console.log('🚀 =====================================');
-    });
-}).catch((error) => {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
-});
+        console.error('
