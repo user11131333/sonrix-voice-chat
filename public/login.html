@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎙️ Sonrix Voice Chat - Giriş</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-size: 4em;
+            margin-bottom: 20px;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.2em;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+
+        .version-badge {
+            display: inline-block;
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .login-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #fcc;
+            display: none;
+            animation: shake 0.5s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+
+        .loading {
+            display: none;
+            margin-top: 15px;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .demo-info {
+            background: linear-gradient(45deg, #e3f2fd, #f3e5f5);
+            border: 1px solid #bbdefb;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 25px;
+            font-size: 14px;
+            color: #1565c0;
+        }
+
+        .demo-info h4 {
+            margin-bottom: 15px;
+            color: #0d47a1;
+            font-size: 16px;
+        }
+
+        .demo-credentials {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 12px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .quick-login {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .quick-btn {
+            flex: 1;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .quick-btn:hover {
+            background: white;
+            border-color: #667eea;
+            transform: translateY(-1px);
+        }
+
+        .features-list {
+            text-align: left;
+            margin-top: 15px;
+        }
+
+        .features-list li {
+            margin: 5px 0;
+            font-size: 13px;
+        }
+
+        @media (max-width: 480px) {
+            .login-container {
+                padding: 30px 20px;
+                margin: 10px;
+            }
+            
+            h1 {
+                font-size: 1.8em;
+            }
+            
+            .logo {
+                font-size: 3em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">🎙️</div>
+        <h1>Sonrix Voice Chat</h1>
+        <div class="version-badge">v1.0.0 Professional</div>
+        <p class="subtitle">WebRTC tabanlı profesyonel sesli sohbet platformu</p>
+
+        <div id="errorMessage" class="error-message"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">👤 Kullanıcı Adı</label>
+                <input type="text" id="username" name="username" required placeholder="Kullanıcı adınızı girin" autocomplete="username">
+            </div>
+
+            <div class="form-group">
+                <label for="password">🔒 Şifre</label>
+                <input type="password" id="password" name="password" required placeholder="Şifrenizi girin" autocomplete="current-password">
+            </div>
+
+            <button type="submit" class="login-btn" id="loginBtn">
+                🚀 Giriş Yap
+            </button>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                Giriş yapılıyor...
+            </div>
+        </form>
+
+        <div class="demo-info">
+            <h4>🔧 Demo Hesap Bilgileri</h4>
+            
+            <div class="demo-credentials">
+                <strong>👑 Admin Hesabı:</strong><br>
+                Kullanıcı: <strong>admin</strong><br>
+                Şifre: <strong>admin123</strong>
+            </div>
+            
+            <div class="demo-credentials">
+                <strong>👤 Normal Kullanıcı:</strong><br>
+                Kullanıcı: <strong>demo</strong><br>
+                Şifre: <strong>demo123</strong>
+            </div>
+
+            <div class="quick-login">
+                <button type="button" class="quick-btn" onclick="quickLogin('admin', 'admin123')">
+                    👑 Admin Girişi
+                </button>
+                <button type="button" class="quick-btn" onclick="quickLogin('demo', 'demo123')">
+                    👤 Demo Girişi
+                </button>
+            </div>
+
+            <div class="features-list">
+                <strong>✨ Platform Özellikleri:</strong>
+                <ul>
+                    <li>🎤 Gerçek zamanlı sesli sohbet</li>
+                    <li>📹 Video görüşme & ekran paylaşımı</li>
+                    <li>👨‍💼 Kapsamlı admin paneli</li>
+                    <li>🏠 Özel oda sistemi</li>
+                    <li>📊 Detaylı istatistikler</li>
+                    <li>🔒 Güvenli authentication</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const loginForm = document.getElementById('loginForm');
+        const loginBtn = document.getElementById('loginBtn');
+        const loading = document.getElementById('loading');
+        const errorMessage = document.getElementById('errorMessage');
+
+        // Auto-focus username field
+        document.getElementById('username').focus();
+
+        // Enter key navigation
+        document.getElementById('username').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('password').focus();
+            }
+        });
+
+        document.getElementById('password').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                loginForm.dispatchEvent(new Event('submit'));
+            }
+        });
+
+        // Quick login function
+        function quickLogin(username, password) {
+            document.getElementById('username').value = username;
+            document.getElementById('password').value = password;
+            loginForm.dispatchEvent(new Event('submit'));
+        }
+
+        // Main login handler
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                showError('Lütfen kullanıcı adı ve şifrenizi girin!');
+                return;
+            }
+
+            setLoading(true);
+            hideError();
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password }),
+                    credentials: 'same-origin'
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    // Successful login
+                    showSuccess(`Hoş geldiniz, ${data.user.username}! Yönlendiriliyorsunuz...`);
+                    
+                    // Redirect based on role
+                    setTimeout(() => {
+                        if (data.user.role === 'admin') {
+                            window.location.href = '/admin';
+                        } else {
+                            window.location.href = '/';
+                        }
+                    }, 1000);
+                    
+                } else {
+                    showError(data.error || 'Giriş başarısız! Lütfen bilgilerinizi kontrol edin.');
+                }
+
+            } catch (error) {
+                console.error('Login error:', error);
+                showError('Bağlantı hatası! Sunucu ile iletişim kurulamadı.');
+            } finally {
+                setLoading(false);
+            }
+        });
+
+        function setLoading(isLoading) {
+            loginBtn.disabled = isLoading;
+            loginBtn.style.display = isLoading ? 'none' : 'block';
+            loading.style.display = isLoading ? 'block' : 'none';
+            
+            // Disable form inputs during loading
+            document.getElementById('username').disabled = isLoading;
+            document.getElementById('password').disabled = isLoading;
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            errorMessage.style.background = '#fee';
+            errorMessage.style.color = '#c33';
+            
+            // Auto-hide after 7 seconds
+            setTimeout(hideError, 7000);
+        }
+
+        function showSuccess(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            errorMessage.style.background = '#efe';
+            errorMessage.style.color = '#3c3';
+            errorMessage.style.borderColor = '#cfc';
+        }
+
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+
+        // Keyboard shortcuts for demo
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey) {
+                switch(e.key) {
+                    case '1':
+                        e.preventDefault();
+                        quickLogin('admin', 'admin123');
+                        break;
+                    case '2':
+                        e.preventDefault();
+                        quickLogin('demo', 'demo123');
+                        break;
+                }
+            }
+        });
+
+        // Welcome animation
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.querySelector('.login-container');
+            container.style.opacity = '0';
+            container.style.transform = 'translateY(30px)';
+            
+            setTimeout(() => {
+                container.style.transition = 'all 0.6s ease';
+                container.style.opacity = '1';
+                container.style.transform = 'translateY(0)';
+            }, 100);
+        });
+
+        // Connection test on page load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/api/user-info');
+                if (response.ok) {
+                    // User already logged in, redirect
+                    const user = await response.json();
+                    if (user.role === 'admin') {
+                        window.location.href = '/admin';
+                    } else {
+                        window.location.href = '/';
+                    }
+                }
+            } catch (error) {
+                // Not logged in, stay on login page
+                console.log('Not authenticated, showing login form');
+            }
+        });
+    </script>
+</body>
+</html>
