@@ -23,16 +23,6 @@ echo "                                                 "
 echo "        Ubuntu 22.04 LTS Kurulum Script'i       "
 echo -e "${NC}"
 
-# Değişkenler
-DOMAIN=""
-EMAIL=""
-DB_ROOT_PASSWORD=""
-DB_USER_PASSWORD=""
-APP_SECRET=""
-SSL_ENABLED="no"
-INSTALL_NGINX="yes"
-INSTALL_PM2="yes"
-
 # Fonksiyonlar
 print_status() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -76,6 +66,19 @@ check_ubuntu() {
 get_user_input() {
     echo -e "${BLUE}=== Kurulum Yapılandırması ===${NC}"
     
+    # Check if running from quick-start (auto-install mode)
+    if [[ "$SONRIX_AUTO_INSTALL" == "yes" ]]; then
+        print_status "Otomatik kurulum modu aktif"
+        DOMAIN="$SONRIX_DOMAIN"
+        EMAIL="$SONRIX_EMAIL"
+        DB_ROOT_PASSWORD="$SONRIX_DB_ROOT_PASSWORD"
+        DB_USER_PASSWORD="$SONRIX_DB_USER_PASSWORD"
+        SSL_ENABLED="$SONRIX_SSL_ENABLED"
+        INSTALL_NGINX="yes"
+        INSTALL_PM2="yes"
+        return
+    fi
+    
     read -p "Domain adı (örn: sonrix.example.com): " DOMAIN
     while [[ -z "$DOMAIN" ]]; do
         print_warning "Domain adı gerekli!"
@@ -104,8 +107,6 @@ get_user_input() {
         echo
     done
     
-    APP_SECRET=$(openssl rand -base64 32)
-    
     read -p "SSL sertifikası yüklensin mi? (y/n) [y]: " SSL_INPUT
     SSL_ENABLED=${SSL_INPUT:-y}
     
@@ -120,8 +121,8 @@ get_user_input() {
 
 update_system() {
     print_status "Sistem güncelleniyor..."
-    sudo apt update
-    sudo apt upgrade -y
+    sudo apt update -qq
+    sudo apt upgrade -y -qq
     sudo apt install -y curl wget git build-essential software-properties-common
 }
 
@@ -148,16 +149,16 @@ install_mysql() {
     # MySQL server yükle
     sudo apt install -y mysql-server mysql-client
     
-    # MySQL güvenlik yapılandırması
-    sudo mysql_secure_installation << EOF
-y
-$DB_ROOT_PASSWORD
-$DB_ROOT_PASSWORD
-y
-y
-y
-y
-EOF
+    # MySQL root şifresini ayarla
+    print_status "MySQL root şifresi ayarlanıyor..."
+    sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DB_ROOT_PASSWORD';"
+    
+    # MySQL güvenlik ayarları
+    sudo mysql -u root -p$DB_ROOT_PASSWORD -e "DELETE FROM mysql.user WHERE User='';"
+    sudo mysql -u root -p$DB_ROOT_PASSWORD -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
+    sudo mysql -u root -p$DB_ROOT_PASSWORD -e "DROP DATABASE IF EXISTS test;"
+    sudo mysql -u root -p$DB_ROOT_PASSWORD -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';"
+    sudo mysql -u root -p$DB_ROOT_PASSWORD -e "FLUSH PRIVILEGES;"
     
     print_status "MySQL 8.0 yüklendi ve yapılandırıldı"
 }
@@ -165,11 +166,13 @@ EOF
 setup_database() {
     print_status "Veritabanı oluşturuluyor..."
     
-    # Şifreyi SQL dosyasında değiştir
-    sed -i "s/PLACEHOLDER_PASSWORD/$DB_USER_PASSWORD/g" ubuntu-mysql-setup.sql
-    
-    # SQL dosyasını çalıştır
-    mysql -u root -p$DB_ROOT_PASSWORD < ubuntu-mysql-setup.sql
+    # Basit database şemasını kullan
+    if [[ -f "database-simple.sql" ]]; then
+        mysql -u root -p$DB_ROOT_PASSWORD < database-simple.sql
+    else
+        print_error "database-simple.sql dosyası bulunamadı!"
+        exit 1
+    fi
     
     print_status "Veritabanı başarıyla oluşturuldu"
 }
@@ -187,7 +190,7 @@ install_nginx() {
     
     # Nginx yapılandırması
     sudo cp nginx-sonrix.conf /etc/nginx/sites-available/sonrix-voice
-    sudo sed -i "s/DOMAIN_NAME/$DOMAIN/g" /etc/nginx/sites-available/sonrix-voice
+    sudo sed -i "s/server_name _;/server_name $DOMAIN;/g" /etc/nginx/sites-available/sonrix-voice
     
     # Site'i etkinleştir
     sudo ln -sf /etc/nginx/sites-available/sonrix-voice /etc/nginx/sites-enabled/
@@ -205,20 +208,15 @@ install_ssl() {
         return
     fi
     
-    print_status "SSL sertifikası yükleniyor..."
+    print_status "SSL kurulum script'i çalıştırılıyor..."
     
-    # Certbot yükle
-    sudo snap install core; sudo snap refresh core
-    sudo snap install --classic certbot
-    sudo ln -sf /snap/bin/certbot /usr/bin/certbot
-    
-    # SSL sertifikası al
-    sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email $EMAIL
-    
-    # Otomatik yenileme
-    sudo systemctl enable snap.certbot.renew.timer
-    
-    print_status "SSL sertifikası yüklendi"
+    # SSL setup script'ini çalıştır
+    if [[ -f "ssl-setup.sh" ]]; then
+        chmod +x ssl-setup.sh
+        ./ssl-setup.sh "$DOMAIN" "$EMAIL"
+    else
+        print_warning "ssl-setup.sh bulunamadı, SSL manuel olarak kurulmalı"
+    fi
 }
 
 setup_firewall() {
@@ -238,50 +236,31 @@ setup_firewall() {
 }
 
 setup_environment() {
-    print_status "Ortam değişkenleri ayarlanıyor..."
+    print_status "Ortam değişkenleri kontrol ediliyor..."
     
-    # .env dosyası oluştur
-    cat > .env << EOF
-# Sunucu Ayarları
-NODE_ENV=production
-PORT=3000
-HOST=0.0.0.0
-
-# Veritabanı Ayarları
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=sonrix_voice
-DB_USER=sonrix_user
-DB_PASSWORD=$DB_USER_PASSWORD
-
-# JWT Ayarları
-JWT_SECRET=$APP_SECRET
-JWT_EXPIRES_IN=24h
-
-# Session Ayarları
-SESSION_SECRET=$APP_SECRET
-SESSION_TIMEOUT=1800000
-
-# WebRTC Ayarları
-STUN_SERVERS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
-TURN_SERVERS=
-
-# Uygulama Ayarları
-MAX_ROOM_USERS=20
-MAX_ROOMS_PER_USER=3
-CLEANUP_INTERVAL=300000
-LOG_LEVEL=info
-
-# SSL/TLS
-SSL_ENABLED=$SSL_ENABLED
-DOMAIN=$DOMAIN
-
-# Admin Ayarları
-ADMIN_EMAIL=$EMAIL
-ENABLE_REGISTRATION=true
-MAINTENANCE_MODE=false
-EOF
-
+    # .env dosyası zaten mevcut mu kontrol et
+    if [[ ! -f ".env" ]]; then
+        print_status ".env dosyası oluşturuluyor..."
+        
+        # .env dosyası oluştur
+        cp .env.example .env
+        
+        # Değişkenleri güncelle
+        sed -i "s/your-domain.com/$DOMAIN/g" .env
+        sed -i "s/your_secure_database_password/$DB_USER_PASSWORD/g" .env
+        sed -i "s/your-email@gmail.com/$EMAIL/g" .env
+        
+        # JWT secret oluştur
+        JWT_SECRET=$(openssl rand -base64 32)
+        sed -i "s/your_very_long_and_secure_jwt_secret_key_here/$JWT_SECRET/g" .env
+        
+        # Session secret oluştur
+        SESSION_SECRET=$(openssl rand -base64 32)
+        sed -i "s/your_session_secret_key_here/$SESSION_SECRET/g" .env
+    else
+        print_status ".env dosyası zaten mevcut"
+    fi
+    
     # Dosya izinleri
     chmod 600 .env
     
@@ -292,7 +271,6 @@ install_dependencies() {
     print_status "Uygulama bağımlılıkları yükleniyor..."
     
     npm install
-    npm audit fix
     
     print_status "Bağımlılıklar yüklendi"
 }
@@ -300,7 +278,7 @@ install_dependencies() {
 setup_systemd_service() {
     print_status "Systemd servisi oluşturuluyor..."
     
-    # Systemd service dosyasını kopyala
+    # Systemd service dosyasını kopyala ve yapılandır
     sudo cp sonrix-voice.service /etc/systemd/system/
     sudo sed -i "s|WORKING_DIRECTORY|$(pwd)|g" /etc/systemd/system/sonrix-voice.service
     sudo sed -i "s|USER_NAME|$(whoami)|g" /etc/systemd/system/sonrix-voice.service
@@ -319,38 +297,11 @@ setup_pm2() {
     
     print_status "PM2 yapılandırılıyor..."
     
-    # PM2 ecosystem dosyası oluştur
-    cat > ecosystem.config.js << EOF
-module.exports = {
-  apps: [{
-    name: 'sonrix-voice',
-    script: 'server.js',
-    instances: 'max',
-    exec_mode: 'cluster',
-    env: {
-      NODE_ENV: 'production',
-      PORT: 3000
-    },
-    error_file: 'logs/err.log',
-    out_file: 'logs/out.log',
-    log_file: 'logs/combined.log',
-    time: true,
-    max_memory_restart: '1G',
-    node_args: '--max-old-space-size=1024',
-    watch: false,
-    ignore_watch: ['node_modules', 'logs'],
-    restart_delay: 4000,
-    max_restarts: 10,
-    min_uptime: '10s'
-  }]
-};
-EOF
-    
     # Log dizini oluştur
     mkdir -p logs
     
-    # PM2 startup
-    pm2 startup systemd -u $(whoami) --hp $(eval echo ~$(whoami))
+    # PM2 startup ayarla
+    pm2 startup systemd -u $(whoami) --hp $(eval echo ~$(whoami)) | grep -E '^sudo' | bash
     
     print_status "PM2 yapılandırıldı"
 }
@@ -366,13 +317,16 @@ create_backup_script() {
 BACKUP_DIR="/var/backups/sonrix-voice"
 DATE=$(date +%Y%m%d_%H%M%S)
 DB_NAME="sonrix_voice"
-DB_USER="sonrix_user"
+DB_USER="root"
 
 # Yedekleme dizini oluştur
 sudo mkdir -p $BACKUP_DIR
 
+# .env dosyasından DB şifresini oku
+DB_PASS=$(grep DB_PASSWORD .env | cut -d '=' -f2)
+
 # Veritabanı yedeği
-mysqldump -u $DB_USER -p $DB_NAME > $BACKUP_DIR/db_backup_$DATE.sql
+mysqldump -u $DB_USER -p$DB_PASS $DB_NAME > $BACKUP_DIR/db_backup_$DATE.sql
 
 # Uygulama dosyaları yedeği
 tar -czf $BACKUP_DIR/app_backup_$DATE.tar.gz . --exclude=node_modules --exclude=logs --exclude=*.log
@@ -406,7 +360,9 @@ $(pwd)/logs/*.log {
     notifempty
     create 644 $(whoami) $(whoami)
     postrotate
-        pm2 reload sonrix-voice
+        if [ -f $(pwd)/logs/app.pid ]; then
+            kill -USR1 \$(cat $(pwd)/logs/app.pid)
+        fi
     endscript
 }
 EOF
@@ -426,7 +382,15 @@ start_application() {
         sudo systemctl start sonrix-voice
     fi
     
-    print_status "Uygulama başlatıldı"
+    # Uygulama başlamasını bekle
+    sleep 5
+    
+    # Health check
+    if curl -s http://localhost:3000/health | grep -q "healthy"; then
+        print_status "Uygulama başarıyla başlatıldı"
+    else
+        print_warning "Uygulama başlatılamadı, logları kontrol edin"
+    fi
 }
 
 print_summary() {
@@ -437,9 +401,18 @@ print_summary() {
     echo -e "${NC}"
     
     echo -e "${BLUE}Uygulama Bilgileri:${NC}"
-    echo "• URL: https://$DOMAIN"
+    if [[ "$SSL_ENABLED" == "y" ]]; then
+        echo "• URL: https://$DOMAIN"
+        echo "• Admin Panel: https://$DOMAIN/admin"
+    else
+        echo "• URL: http://$DOMAIN"
+        echo "• Admin Panel: http://$DOMAIN/admin"
+    fi
     echo "• Local: http://localhost:3000"
-    echo "• Admin Panel: https://$DOMAIN/admin.html"
+    
+    echo -e "${BLUE}Giriş Bilgileri:${NC}"
+    echo "• Admin: admin / admin123"
+    echo "• Demo: demo / demo123"
     
     echo -e "${BLUE}Veritabanı Bilgileri:${NC}"
     echo "• Host: localhost"
@@ -448,11 +421,12 @@ print_summary() {
     
     echo -e "${BLUE}Servis Komutları:${NC}"
     if [[ "$INSTALL_PM2" == "y" ]]; then
-        echo "• Başlat: pm2 start sonrix-voice"
+        echo "• Başlat: pm2 start ecosystem.config.js"
         echo "• Durdur: pm2 stop sonrix-voice"
         echo "• Yeniden başlat: pm2 restart sonrix-voice"
         echo "• Loglar: pm2 logs sonrix-voice"
         echo "• Durum: pm2 status"
+        echo "• Monitoring: pm2 monit"
     else
         echo "• Başlat: sudo systemctl start sonrix-voice"
         echo "• Durdur: sudo systemctl stop sonrix-voice"
@@ -465,16 +439,26 @@ print_summary() {
     echo "• Manuel: ./backup.sh"
     echo "• Otomatik: Her gün saat 02:00"
     
-    echo -e "${BLUE}Yapılandırma Dosyaları:${NC}"
-    echo "• Uygulama: .env"
-    echo "• Nginx: /etc/nginx/sites-available/sonrix-voice"
-    echo "• PM2: ecosystem.config.js"
+    echo -e "${BLUE}Faydalı Komutlar:${NC}"
+    echo "• Nginx test: sudo nginx -t"
+    echo "• Nginx reload: sudo systemctl reload nginx"
+    echo "• MySQL bağlan: mysql -u root -p"
+    echo "• Firewall durum: sudo ufw status"
     
-    echo -e "${YELLOW}İlk admin kullanıcısını oluşturmak için:${NC}"
-    echo "• https://$DOMAIN/login.html adresine gidin"
-    echo "• 'Kayıt Ol' sekmesinden admin hesabı oluşturun"
+    if [[ "$SSL_ENABLED" == "y" ]]; then
+        echo -e "${BLUE}SSL Bilgileri:${NC}"
+        echo "• Sertifika: /etc/letsencrypt/live/$DOMAIN/"
+        echo "• Yenileme: sudo certbot renew"
+        echo "• Durum: sudo certbot certificates"
+    fi
     
-    echo -e "${GREEN}Kurulum tamamlandı! Sonrix Voice kullanmaya hazır.${NC}"
+    echo -e "${YELLOW}Güvenlik Notları:${NC}"
+    echo "• .env dosyasını git'e eklemeyin"
+    echo "• Admin şifresini değiştirin"
+    echo "• Düzenli yedekleme yapın"
+    echo "• Güvenlik güncellemelerini takip edin"
+    
+    echo -e "${GREEN}✅ Sonrix Voice kullanmaya hazır!${NC}"
 }
 
 # Ana fonksiyon
@@ -492,7 +476,6 @@ main() {
     install_mysql
     setup_database
     install_nginx
-    install_ssl
     setup_firewall
     setup_environment
     install_dependencies
@@ -501,6 +484,7 @@ main() {
     create_backup_script
     setup_monitoring
     start_application
+    install_ssl  # SSL'i en son kur
     
     print_summary
 }
