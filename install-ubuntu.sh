@@ -165,6 +165,9 @@ EOF
 setup_database() {
     print_status "Veritabanı oluşturuluyor..."
     
+    # Şifreyi SQL dosyasında değiştir
+    sed -i "s/PLACEHOLDER_PASSWORD/$DB_USER_PASSWORD/g" ubuntu-mysql-setup.sql
+    
     # SQL dosyasını çalıştır
     mysql -u root -p$DB_ROOT_PASSWORD < ubuntu-mysql-setup.sql
     
