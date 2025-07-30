@@ -1,0 +1,82 @@
+[Unit]
+Description=Sonrix Voice - WebRTC Sesli Sohbet Uygulaması
+Documentation=https://github.com/yourusername/sonrix-voice
+After=network.target mysql.service
+Wants=mysql.service
+RequiresMountsFor=/var/log
+
+[Service]
+Type=simple
+User=USER_NAME
+Group=USER_NAME
+WorkingDirectory=WORKING_DIRECTORY
+ExecStart=/usr/bin/node server.js
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s TERM $MAINPID
+
+# Ortam değişkenleri
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOST=0.0.0.0
+EnvironmentFile=-WORKING_DIRECTORY/.env
+
+# Yeniden başlatma ayarları
+Restart=always
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Kaynak sınırları
+LimitNOFILE=65536
+LimitNPROC=4096
+LimitAS=2147483648
+
+# Güvenlik ayarları
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=WORKING_DIRECTORY/logs WORKING_DIRECTORY/uploads /tmp
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictNamespaces=true
+
+# Ağ güvenliği
+IPAccounting=true
+IPAddressAllow=any
+IPAddressDeny=none
+
+# Sistem çağrısı filtreleme
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@debug @mount @cpu-emulation @obsolete @privileged @reboot @swap @raw-io
+
+# Memory ve CPU ayarları
+MemoryAccounting=true
+MemoryMax=1G
+MemoryHigh=800M
+CPUAccounting=true
+CPUQuota=200%
+TasksMax=1024
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sonrix-voice
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+TimeoutAbortSec=5s
+
+# Watchdog
+WatchdogSec=30s
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target
+Alias=sonrix.service
