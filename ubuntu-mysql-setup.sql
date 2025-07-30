@@ -520,7 +520,133 @@ BEGIN
     -- 3-100 karakter arası, sadece harf, rakam, boşluk ve bazı özel karakterler
     IF LENGTH(TRIM(room_name)) >= 3 
        AND LENGTH(TRIM(room_name)) <= 100
-       AND room_name REGEXP '^[a-zA-Z0-9ğüşıöçĞÜŞİÖÇ ._-]+ THEN
+       AND room_name REGEXP '^[a-zA-Z0-9ğüşıöçĞÜŞİÖÇ ._-]+
+    
+    RETURN result;
+END //
+DELIMITER ;
+
+-- =======================
+-- MONITORING VE LOGGING
+-- =======================
+
+-- Performans monitoring tablosu
+CREATE TABLE IF NOT EXISTS performance_metrics (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    metric_name VARCHAR(100) NOT NULL,
+    metric_value DECIMAL(15,4) NOT NULL,
+    metric_unit VARCHAR(20) NOT NULL,
+    recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (id),
+    INDEX idx_metric_name_recorded (metric_name, recorded_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Rate limiting tablosu
+CREATE TABLE IF NOT EXISTS rate_limits (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    identifier VARCHAR(100) NOT NULL, -- IP, user_id vs
+    action_type VARCHAR(50) NOT NULL, -- login, create_room vs
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 1,
+    window_start TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    blocked_until TIMESTAMP NULL,
+    
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_identifier_action (identifier, action_type),
+    INDEX idx_window_start (window_start),
+    INDEX idx_blocked_until (blocked_until)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =======================
+-- BACKUP VE RESTORE PROCEDURE'LER
+-- =======================
+
+-- Backup metadata tablosu
+CREATE TABLE IF NOT EXISTS backup_metadata (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    backup_type ENUM('full', 'incremental', 'differential') NOT NULL,
+    backup_path VARCHAR(500) NOT NULL,
+    backup_size BIGINT UNSIGNED NOT NULL,
+    checksum VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    restored_at TIMESTAMP NULL,
+    
+    PRIMARY KEY (id),
+    INDEX idx_backup_type (backup_type),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =======================
+-- SON KONTROLLER
+-- =======================
+
+-- Tablo boyutlarını kontrol et
+SELECT 
+    TABLE_NAME as 'Tablo',
+    ROUND(((DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024), 2) as 'Boyut (MB)',
+    TABLE_ROWS as 'Satır Sayısı'
+FROM information_schema.TABLES 
+WHERE TABLE_SCHEMA = 'sonrix_voice'
+ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC;
+
+-- İndeks kullanımını kontrol et
+SELECT 
+    TABLE_NAME as 'Tablo',
+    INDEX_NAME as 'İndeks',
+    COLUMN_NAME as 'Sütun',
+    CARDINALITY as 'Benzersizlik'
+FROM information_schema.STATISTICS 
+WHERE TABLE_SCHEMA = 'sonrix_voice'
+ORDER BY TABLE_NAME, INDEX_NAME;
+
+-- Foreign key kontrolü
+SELECT 
+    TABLE_NAME as 'Tablo',
+    COLUMN_NAME as 'Sütun', 
+    CONSTRAINT_NAME as 'Kısıt',
+    REFERENCED_TABLE_NAME as 'Referans Tablo',
+    REFERENCED_COLUMN_NAME as 'Referans Sütun'
+FROM information_schema.KEY_COLUMN_USAGE 
+WHERE TABLE_SCHEMA = 'sonrix_voice' 
+  AND REFERENCED_TABLE_SCHEMA = 'sonrix_voice'
+ORDER BY TABLE_NAME;
+
+-- =======================
+-- BAŞARIYLA TAMAMLANDI
+-- =======================
+
+-- Kurulum logunu kaydet
+INSERT INTO system_logs (level, message, meta) 
+VALUES (
+    'info', 
+    'Database setup completed successfully', 
+    JSON_OBJECT(
+        'version', '2.0.0',
+        'mysql_version', VERSION(),
+        'setup_date', NOW(),
+        'charset', 'utf8mb4',
+        'collation', 'utf8mb4_unicode_ci'
+    )
+);
+
+-- Başarı mesajı
+SELECT 
+    'Sonrix Voice veritabanı başarıyla kuruldu!' as 'Durum',
+    VERSION() as 'MySQL Sürümü',
+    COUNT(*) as 'Oluşturulan Tablo Sayısı'
+FROM information_schema.TABLES 
+WHERE TABLE_SCHEMA = 'sonrix_voice';
+
+-- Güvenlik uyarısı
+SELECT 
+    'UYARI: Kurulum tamamlandıktan sonra veritabanı şifrelerini değiştirmeyi unutmayın!' as 'Güvenlik Uyarısı';
+
+-- Son kullanım talimatları
+SELECT CONCAT(
+    'Kurulum tamamlandı. ',
+    'Uygulama .env dosyasında DB_PASSWORD değerini güncelleyin. ',
+    'Daha sonra "npm start" komutu ile uygulamayı başlatabilirsiniz.'
+) as 'Son Adımlar'; THEN
         SET result = TRUE;
     END IF;
     
